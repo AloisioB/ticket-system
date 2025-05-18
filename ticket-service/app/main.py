@@ -1,11 +1,11 @@
 from fastapi import FastAPI, Depends, HTTPException
 from sqlalchemy.orm import Session  # Add this import
 from jose import JWTError, jwt
-import models, database
-from database import SessionLocal, engine
+from . import models
+from .database import SessionLocal, engine
 from pydantic import BaseModel
 import os
-from typing import List
+from typing import List, Optional
 
 # Create tables
 models.Base.metadata.create_all(bind=engine)
@@ -23,9 +23,9 @@ def get_db():
     finally:
         db.close()
 
-class TicketCreate(BaseModel):
-    title: str
-    description: str
+class TicketUpdate(BaseModel):
+    title: Optional[str] = None
+    description: Optional[str] = None
 
 async def get_current_user(token: str):
     credentials_exception = HTTPException(
@@ -43,7 +43,7 @@ async def get_current_user(token: str):
 
 @app.post("/tickets/")
 async def create_ticket(
-    ticket: TicketCreate,
+    ticket: str,
     db: Session = Depends(get_db),  # Now properly typed
     username: str = Depends(get_current_user)
 ):
@@ -59,7 +59,7 @@ async def create_ticket(
 
 
 
-@app.get("/tickets/", response_model=List[TicketCreate])
+@app.get("/tickets/")
 async def list_tickets(
     db: Session = Depends(get_db),
     username: str = Depends(get_current_user)
@@ -81,8 +81,8 @@ async def get_ticket(
 
 
 class TicketUpdate(BaseModel):
-    title: str | None = None
-    description: str | None = None
+    title: Optional[str] = None
+    description: Optional[str] = None
 
 @app.put("/tickets/{ticket_id}")
 async def update_ticket(
