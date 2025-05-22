@@ -1,17 +1,10 @@
 from sqlalchemy import Column, Integer, String
-from database import Base
-from passlib.context import CryptContext  # Correct import
-
-# Create password context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from app.database import Base
 
 class User(Base):
     __tablename__ = "users"
 
     id = Column(Integer, primary_key=True, index=True)
-    username = Column(String, unique=True, index=True)
-    email = Column(String, unique=True, index=True)
-    hashed_password = Column(String)
+    name = Column(String, nullable=False)
+    email = Column(String, nullable=False, unique=True)
 
-    def verify_password(self, password: str):
-        return pwd_context.verify(password, self.hashed_password)

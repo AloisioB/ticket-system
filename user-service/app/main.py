@@ -1,19 +1,23 @@
-from fastapi import FastAPI, Depends, HTTPException, status
+from fastapi import FastAPI, Depends, HTTPException
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from sqlalchemy.orm import Session
-import models
-from database import SessionLocal, engine
-from pydantic import BaseModel
-from passlib.context import CryptContext  # Correct import
+import httpx
 
-# Create password context
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+from app.database import SessionLocal, engine, Base
 
-# Create tables
-models.Base.metadata.create_all(bind=engine)
+from app import models
+from app.schemas import UserCreate, UserOut
 
 app = FastAPI()
+security = HTTPBearer()
 
-# Dependency
+# Create DB tables
+Base.metadata.create_all(bind=engine)
+
+# Auth service endpoint
+AUTH_SERVICE_URL = "http://localhost:8001/validate"
+
+# Dependency to get DB session
 def get_db():
     db = SessionLocal()
     try:
@@ -21,70 +25,45 @@ def get_db():
     finally:
         db.close()
 
-class UserCreate(BaseModel):
-    username: str
-    email: str
-    password: str
+async def validate_token(token: str):
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient() as client:
+        response = await client.get(AUTH_SERVICE_URL, headers=headers)
+    print("Auth Service Response:", response.status_code, response.text)
+    if response.status_code != 200:
+        raise HTTPException(status_code=response.status_code, detail="Invalid token")
+    return response.json()
 
-@app.post("/users/", status_code=status.HTTP_201_CREATED)
-def create_user(user: UserCreate, db: Session = Depends(get_db)):
-    # Check if username exists
-    db_user = db.query(models.User).filter(models.User.username == user.username).first()
-    if db_user:
-        raise HTTPException(status_code=400, detail="Username already registered")
-    
-    # Hash password
-    hashed_password = pwd_context.hash(user.password)
-    
-    # Create user
-    db_user = models.User(
-        username=user.username,
-        email=user.email,
-        hashed_password=hashed_password
-    )
-    db.add(db_user)
+
+@app.post("/users", response_model=UserOut)
+async def create_user(user: UserCreate, db: Session = Depends(get_db)):
+    existing = db.query(models.User).filter(models.User.email == user.email).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Email already registered")
+    new_user = models.User(**user.dict())
+    db.add(new_user)
     db.commit()
-    db.refresh(db_user)
-    return db_user
-
-@app.post("/users/verify")
-async def verify_user(username: str, password: str, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.username == username).first()
-    if not user or not user.verify_password(password):
-        return {"valid": False}
-    return {"valid": True}
+    db.refresh(new_user)
+    return new_user
 
 
-from typing import List
-
-class UserOut(BaseModel):
-    id: int
-    username: str
-    email: str
-
-    class Config:
-        orm_mode = True
-
-@app.get("/users/", response_model=List[UserOut])
-def get_all_users(db: Session = Depends(get_db)):
-    users = db.query(models.User).all()
-    return users
+@app.get("/users", response_model=list[UserOut])
+async def list_users(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    await validate_token(credentials.credentials)
+    return db.query(models.User).all()
 
 
 @app.get("/users/{user_id}", response_model=UserOut)
-def get_user(user_id: int, db: Session = Depends(get_db)):
+async def get_user(
+    user_id: int,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
+):
+    await validate_token(credentials.credentials)
     user = db.query(models.User).filter(models.User.id == user_id).first()
-    if user is None:
+    if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return user
-
-
-
-@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_user(user_id: int, db: Session = Depends(get_db)):
-    user = db.query(models.User).filter(models.User.id == user_id).first()
-    if user is None:
-        raise HTTPException(status_code=404, detail="User not found")
-    db.delete(user)
-    db.commit()
-    return

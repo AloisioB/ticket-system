@@ -3,20 +3,24 @@ version: '3.8'
 services:
   auth-service:
     build: ./auth-service
+    container_name: auth-service
     ports:
       - "8001:8000"
     environment:
       - SECRET_KEY=your-strong-secret
-      - USER_SERVICE_URL=http://user-service:8000
     networks:
       - ticket-network
+    volumes:
+      - auth-data:/app/data
 
   user-service:
     build: ./user-service
+    container_name: user-service
     ports:
       - "8002:8000"
     environment:
       - DATABASE_URL=sqlite:///./user.db
+      - AUTH_SERVICE_URL=http://auth-service:8000/validate
     networks:
       - ticket-network
     volumes:
@@ -24,11 +28,12 @@ services:
 
   ticket-service:
     build: ./ticket-service
+    container_name: ticket-service
     ports:
-      - "8000:8000"
+      - "8003:8000"
     environment:
-      - SECRET_KEY=your-strong-secret
-      - USER_SERVICE_URL=http://user-service:8000
+      - DATABASE_URL=sqlite:///./ticket.db
+      - AUTH_SERVICE_URL=http://auth-service:8000/validate
     networks:
       - ticket-network
     volumes:
@@ -39,5 +44,6 @@ networks:
     driver: bridge
 
 volumes:
+  auth-data:
   user-data:
   ticket-data:

@@ -1,21 +1,23 @@
-from fastapi import FastAPI, Depends, HTTPException
-from sqlalchemy.orm import Session  # Add this import
-from jose import JWTError, jwt
-from . import models
-from .database import SessionLocal, engine
-from pydantic import BaseModel
-import os
-from typing import List, Optional
+from fastapi import FastAPI, HTTPException, Depends
+from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+from sqlalchemy.orm import Session
+import httpx
 
-# Create tables
-models.Base.metadata.create_all(bind=engine)
+from app.database import SessionLocal, engine
+from app.schemas import TicketCreate, TicketUpdate, TicketOut
+
+from app import models
 
 app = FastAPI()
+models.Base.metadata.create_all(bind=engine)
 
-SECRET_KEY = os.getenv("SECRET_KEY")
-ALGORITHM = "HS256"
+# Auth Service validation URL
+AUTH_SERVICE_URL = "http://localhost:8001/validate"
 
-# Database dependency
+# Security scheme
+security = HTTPBearer()
+
+# Dependency to get DB session
 def get_db():
     db = SessionLocal()
     try:
@@ -23,114 +25,71 @@ def get_db():
     finally:
         db.close()
 
-class TicketUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
+# Function to validate JWT with Auth Service
+async def validate_token(token: str):
+    headers = {"Authorization": f"Bearer {token}"}
+    async with httpx.AsyncClient() as client:
+        response = await client.get(AUTH_SERVICE_URL, headers=headers)
+    if response.status_code != 200:
+        raise HTTPException(status_code=401, detail="Invalid token")
+    return response.json()
 
-async def get_current_user(token: str):
-    credentials_exception = HTTPException(
-        status_code=401,
-        detail="Could not validate credentials"
-    )
-    try:
-        payload = jwt.decode(token, SECRET_KEY, algorithms=[ALGORITHM])
-        username: str = payload.get("sub")
-        if username is None:
-            raise credentials_exception
-    except JWTError:
-        raise credentials_exception
-    return username
-
-@app.post("/tickets/")
+# Create a ticket
+@app.post("/tickets", response_model=TicketOut)
 async def create_ticket(
-    ticket: str,
-    db: Session = Depends(get_db),  # Now properly typed
-    username: str = Depends(get_current_user)
+    ticket: TicketCreate,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
 ):
-    db_ticket = models.Ticket(
-        title=ticket.title,
-        description=ticket.description,
-        owner=username
-    )
+    await validate_token(credentials.credentials)
+    db_ticket = models.Ticket(**ticket.dict())
     db.add(db_ticket)
     db.commit()
     db.refresh(db_ticket)
     return db_ticket
 
 
-
-@app.get("/tickets/")
+# List all tickets
+@app.get("/tickets", response_model=list[TicketOut])
 async def list_tickets(
-    db: Session = Depends(get_db),
-    username: str = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
 ):
-    tickets = db.query(models.Ticket).filter(models.Ticket.owner == username).all()
-    return tickets
+    await validate_token(credentials.credentials)
+    return db.query(models.Ticket).all()
 
 
-@app.get("/tickets/{ticket_id}")
-async def get_ticket(
-    ticket_id: int,
-    db: Session = Depends(get_db),
-    username: str = Depends(get_current_user)
-):
-    ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
-    if not ticket or ticket.owner != username:
-        raise HTTPException(status_code=404, detail="Ticket not found")
-    return ticket
-
-
-class TicketUpdate(BaseModel):
-    title: Optional[str] = None
-    description: Optional[str] = None
-
-@app.put("/tickets/{ticket_id}")
+# Update a ticket
+@app.put("/tickets/{ticket_id}", response_model=TicketOut)
 async def update_ticket(
     ticket_id: int,
     ticket_data: TicketUpdate,
-    db: Session = Depends(get_db),
-    username: str = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
 ):
+    await validate_token(credentials.credentials)
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
-    if not ticket or ticket.owner != username:
+    if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-
-    if ticket_data.title:
-        ticket.title = ticket_data.title
-    if ticket_data.description:
-        ticket.description = ticket_data.description
-
+    for key, value in ticket_data.dict(exclude_unset=True).items():
+        setattr(ticket, key, value)
     db.commit()
     db.refresh(ticket)
     return ticket
 
 
+# Delete a ticket
 @app.delete("/tickets/{ticket_id}")
 async def delete_ticket(
     ticket_id: int,
-    db: Session = Depends(get_db),
-    username: str = Depends(get_current_user)
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db)
 ):
+    await validate_token(credentials.credentials)
     ticket = db.query(models.Ticket).filter(models.Ticket.id == ticket_id).first()
-    if not ticket or ticket.owner != username:
+    if not ticket:
         raise HTTPException(status_code=404, detail="Ticket not found")
-
     db.delete(ticket)
     db.commit()
     return {"detail": "Ticket deleted"}
-
-
-@app.get("/tickets/search/")
-async def search_tickets(
-    keyword: str,
-    db: Session = Depends(get_db),
-    username: str = Depends(get_current_user)
-):
-    results = db.query(models.Ticket).filter(
-        models.Ticket.owner == username,
-        (models.Ticket.title.ilike(f"%{keyword}%") |
-         models.Ticket.description.ilike(f"%{keyword}%"))
-    ).all()
-    return results
-
 
