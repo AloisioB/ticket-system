@@ -12,7 +12,7 @@ app = FastAPI()
 models.Base.metadata.create_all(bind=engine)
 
 # Auth Service validation URL
-AUTH_SERVICE_URL = "http://localhost:8001/validate"
+AUTH_SERVICE_URL = "http://auth-service:8000/validate"
 
 # Security scheme
 security = HTTPBearer()

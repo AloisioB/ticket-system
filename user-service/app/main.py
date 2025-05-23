@@ -15,7 +15,7 @@ security = HTTPBearer()
 Base.metadata.create_all(bind=engine)
 
 # Auth service endpoint
-AUTH_SERVICE_URL = "http://localhost:8001/validate"
+AUTH_SERVICE_URL = "http://auth-service:8000/validate"
 
 # Dependency to get DB session
 def get_db():
