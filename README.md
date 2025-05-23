@@ -10,8 +10,8 @@ Este projeto utiliza **Docker Compose** para orquestração de múltiplos servi�
 
 - **Docker**: Contêinerização de serviços.
 - **Docker Compose**: Orquestração dos contêineres.
-- **FastAPI**
-- **SQLite** 
+- **FastAPI**: Framework web para APIs rápidas e assíncronas.
+- **SQLite**: Banco de dados SQL leve e embutido.
 
 
 ---
